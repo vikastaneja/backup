@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="httpclient-4.3.1-sfdc-1">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/jars/httpclient-4.3.1-sfdc-1.jar!/" />
+      <root url="jar://$USER_HOME$/jars/guava.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
