@@ -1,5 +1,8 @@
 package identity.util.httplibrary;
 import com.google.common.base.Strings;
+import com.google.common.collect.Maps;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVRecord;
 import org.w3c.dom.css.Counter;
 
 import java.nio.file.Files;
@@ -8,8 +11,10 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.*;
 import java.io.*;
+import org.apache.commons.csv.CSVParser;
 //import java.util.ArrayList;
 //import java.util.List;
 //
@@ -32,6 +37,7 @@ import java.io.*;
  */
 public class LogAnalysis { // extends Service {
 
+    public static Map<String, CSVRecord> result;
     private class Counters {
 
 
@@ -44,6 +50,7 @@ public class LogAnalysis { // extends Service {
         private final String referer;
         private final String userAgent;
         private final String orgId;
+        private final String userId;
 
 
         private Counters () {
@@ -56,10 +63,12 @@ public class LogAnalysis { // extends Service {
             referer = null;
             userAgent = null;
             orgId = null;
+            userId = null;
         }
 
         public Counters(String name, String method, String proxy, String cookie,
-                        String param, String loginType, String referer, String userAgent, String orgId) {
+                        String param, String loginType, String referer, String userAgent,
+                        String orgId, String userId) {
             this.name = name;
 
             this.method = method;
@@ -77,7 +86,11 @@ public class LogAnalysis { // extends Service {
             this.userAgent = userAgent;
 
             this.orgId = orgId;
+
+            this.userId = userId;
         }
+
+        public String getUserId() { return userId; }
 
         public String getOrgId() { return orgId; }
 
@@ -118,7 +131,9 @@ public class LogAnalysis { // extends Service {
 //        // TODO Auto-generated constructor stub
 //    }
 
+
     private final String folderName;
+    private int totalCount = 0;
     private static int e_fpCount = 0;
     private static int e_moreInfoCount = 0;
     private static int e_totalCount = 0;
@@ -133,6 +148,11 @@ public class LogAnalysis { // extends Service {
     private Map<String, Integer> userAgentCounters = new HashMap<String, Integer>();
     private Map<String, Integer> typeOfLoginCounters = new HashMap<String, Integer>();
 
+    private Map<String, Integer> userCounter = new HashMap<String, Integer>();
+    private Map<String, List<Counters>> userIdToUserName = new HashMap<String, List<Counters>>();
+    private Map<String, Map<String, Counters>> orgs = new HashMap<String, Map<String, Counters>>();
+    private Map<String, Map<String, Integer>> orgToUser = new HashMap<String, Map<String, Integer>>();
+
 
     // Using the format for bit array <method><cookie><param><proxy>
 
@@ -141,7 +161,7 @@ public class LogAnalysis { // extends Service {
             if (Files.isRegularFile(filePath) && filePath.getFileName().toString().endsWith(".csv")) {
                 try {
                     try(PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter("/Users/vtaneja/ForcedLogin/myfile.txt", true)))) {
-                        printLog(out, "\nFile: " + filePath.getFileName().toString());
+                        // printLog(out, "\nFile: " + filePath.getFileName().toString());
                     } catch (IOException e) {
                         //exception handling left as an exercise for the reader
                         e.printStackTrace();
@@ -184,12 +204,16 @@ public class LogAnalysis { // extends Service {
     }
 
     public void analyzeCSPLogs() {
+        this.counters.clear();
+        totalCount = 0;
         try {
             String sCurrentLine;
             String str = "";
-
+            int i = 0;
             while ((sCurrentLine = br.readLine()) != null) {
+//                System.out.println("Record#: " + ++i);
                 if(sCurrentLine.contains("sclcm,")) {
+                    totalCount++;
                     processLog(sCurrentLine);
                     str = sCurrentLine;
                 }
@@ -199,173 +223,572 @@ public class LogAnalysis { // extends Service {
             processLog(str);
             try(PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter("/Users/vtaneja/ForcedLogin/myfile.txt", true /* append to end */)))) {
                 String log = java.text.DateFormat.getDateTimeInstance().format(Calendar.getInstance().getTime());
-                printLog(out, log);
+                // printLog(out, log);
 
-                printLog(out, "----> Duration: 8hrs");
+//                log = "----> total:  " + this.counters.size();
 
-                log = "----> total:  " + this.counters.size();
+                log = "----> total:  " + totalCount;
 
-                printLog(out, log);
+                // printLog(out, log);
 
-                log = "----> total for POST: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST")).count();
-                printLog(out, log);
-                log = "----> total for GET: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET")).count();
-                printLog(out, log);
+                String METHOD = "GET";
 
-                log = "----> total for POST with null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && p.getProxy().equals("null")).count();
-                printLog(out, log);
+                HashMap<String, Integer> sortedOrgMap = this.sortByValues(this.orgsCounter);
+                printLog(out, "===========>>>>>>>>>>");
+//                printLog(out, "OrgId,Count");
+                for(Map.Entry<String, Integer> entry : sortedOrgMap.entrySet()) {
+                    StringBuilder sb = new StringBuilder();
+//                    sb.append("OrgId: ").append(entry.getKey()).append(", Count: ").append(entry.getValue());
+                    sb.append(entry.getKey()).append(",").append(entry.getValue());
 
-                log = "----> total for POST with non null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getProxy().equals("null")).count();
-                printLog(out, log);
-                log = "----> total for GET with non null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && !p.getProxy().equals("null")).count();
-                printLog(out, log);
-
-                log = "----> total for GET with null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && p.getProxy().equals("null")).count();
-                printLog(out, log);
-                log = "----> total for GET with null cookie and null value: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && p.getCookie().equals("null") && p.getParam().equals("null")).count();
-
-                printLog(out, log);
-                log = "----> total for POST with cookie and null param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getCookie().equals("null") && p.getParam().equals("null")).count();
-                printLog(out, log);
-                log = "----> total for POST with null cookie and null param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && p.getCookie().equals("null") && p.getParam().equals("null")).count();
-                printLog(out, log);
-
-                log = "----> total for POST with cookie and param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getCookie().equals("null") && !p.getParam().equals("null")).count();
-                printLog(out, log);
-
-                log = "----> total with non null user agent: " + this.counters.parallelStream().filter(p -> !"null".equals(p.getUserAgent())).count();
-                printLog(out, log);
-
-                log = "----> total with non null referer: " + this.counters.parallelStream().filter(p -> !"null".equals(p.getReferer())).count();
-                printLog(out, log);
-
-                log = "----> Total orgs: " + orgsCounter.size();
-                printLog(out, log);
-
-                log = "----> Total user agents: " + userAgentCounters.size();
-                printLog(out, log);
-
-                log = "----> User agents:\n";
-                printLog(out, log);
-
-                Set<String> agents = userAgentCounters.keySet();
-                log = "";
-                int nonBrowserAttempt = 0;
-                StringBuilder nonBrowserAgents = new StringBuilder();
-                for (String agent : agents) {
-                    log += agent + " ##### ";
-                    if (agent.length() <= "Mozilla/".length() || !agent.substring(0, "Mozilla/".length()).equals("Mozilla/")) {
-                        nonBrowserAgents.append(agent).append(" ##### ");
-                        nonBrowserAttempt++;
-                    }
+//                    printLog(out, sb.toString());
                 }
 
+                printLog(out, "===========>>>>>>>>>>");
+//                printLog(out, "OrgId,UserId,Count");
+                for (Map.Entry<String, Map<String, Integer>> entry : orgToUser.entrySet()) {
+                    for (Map.Entry<String, Integer> e : entry.getValue().entrySet()) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append(entry.getKey()).append(",").append(e.getKey()).append(",").append(e.getValue());
 
-//                printLog(out, log);
-
-                log = "----> Non browser attempts: " + nonBrowserAttempt;
-
-                printLog(out, log);
-
-                printLog(out, nonBrowserAgents.toString());
-
-                log = "----> Total login types: " + typeOfLoginCounters.size();
-                printLog(out, log);
-
-                log = "----> Login types: ";
-                printLog(out, log);
-
-                Set<String> types = typeOfLoginCounters.keySet();
-                log = "";
-                int nonUITotal = 0;
-                int totalNonUITypes = 0;
-                StringBuilder nonUIAttempts = new StringBuilder();
-                nonUIAttempts.append("\n*** Non-UI attempt types: \n");
-                for (String agent : types) {
-                    log += agent + " ##### ";
-                    if (!"UI".equals(agent.split(",")[0])) {
-                        nonUITotal += typeOfLoginCounters.get(agent);
-                        totalNonUITypes++;
-                        nonUIAttempts.append(agent).append(" ##### ");
+//                        printLog(out, sb.toString());
                     }
+
                 }
 
-                printLog(out, log);
+                printLog(out, "===========>>>>>>>>>>");
+//                printLog(out, "OrgId-UserId,Count");
+                for (Map.Entry<String, Map<String, Integer>> entry : orgToUser.entrySet()) {
+                    for (Map.Entry<String, Integer> e : entry.getValue().entrySet()) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append(entry.getKey()).append("-").append(e.getKey()).append(",").append(e.getValue());
 
-                log = "\n*** Total Non UI type logins: " + totalNonUITypes + ", total login attemps for non-ui types: " + nonUITotal;
-                printLog(out, log);
-                printLog(out, nonUIAttempts.toString());
+//                        printLog(out, sb.toString());
+                    }
 
-                log = "----> total with UI login, HTTP POST, mismatch values: "
-                        + this.counters.parallelStream().filter(p -> !"UI".equals(p.getLoginType().split(",")[0])
-                        && p.getMethod().equals("POST")
-                        && !p.getCookie().equals("null") && !p.getParam().equals("null")).count();
-                printLog(out, log);
+                }
 
-//                log = "\n----> For mismatch values with HTTP POST:";
-//                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(p -> p.getMethod().equals("POST")
-//                                && !p.getCookie().equals("null") && !p.getParam().equals("null"));
+                printLog(out, "===========>>>>>>>>>>");
+//                StringBuilder sb1 = new StringBuilder();
+//                sb1.append("SELECT Account,Active,CreatedDate,Id,Name,OrganizationType,Server,SignupCountryIsoCode,Status FROM AllOrganization WHERE ");
 //
-//                List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
-//                for (Counters counter : mcounters) {
-//                    System.out.print(counter.getReferer() + " ##### ");
-//                    log += "\n\nOrg Id *****  " + counter.getOrgId();
-//                    log += "\nUser Agent ---- " + counter.getUserAgent();
-//                    log += "\nLogin type ==== " + counter.getLoginType();
-//                    log += "\nReferer   ##### " + counter.getReferer();
+//                for(Map.Entry<String, Integer> entry : sortedOrgMap.entrySet()) {
+//
+////                    sb.append("OrgId: ").append(entry.getKey()).append(", Count: ").append(entry.getValue());
+//                    sb1.append("Id='").append(entry.getKey()).append("' OR ");
+//
+//
+//                }
+
+//                printLog(out, sb1.toString());
+//                printLog(out, "===========>>>>>>>>>>");
+//
+//                printLog(out, "OrgId,UserId,OrgCount,UserCount,OrgName,OrgType,Status");
+//                for (Map.Entry<String, Map<String, Integer>> entry : orgToUser.entrySet()) {
+//                    for (Map.Entry<String, Integer> e : entry.getValue().entrySet()) {
+//
+//                        StringBuilder sb = new StringBuilder();
+//
+//                        sb.append(entry.getKey()).append(",").append(e.getKey()).append(",").append(sortedOrgMap.get(entry.getKey())).append(",").append(e.getValue());
+//
+//                        if (result.containsKey(entry.getKey())) {
+//                            CSVRecord r = result.get(entry.getKey());
+//
+//                            sb.append(",").append(r.get(4).replace(',','-').replace('"',' ').replace(">", "&gt").replace("<", "&lt")).append(",").append(r.get(5)).append(",").append(r.get(8));
+//
+//                        } else {
+//                            sb.append(",").append("EMPTY").append(",").append("EMPTY").append(",").append("EMPTY");
+//                        }
+//
+//                        printLog(out, sb.toString());
+//                    }
+//
+//
 //                }
 //
-//                printLog(out, log);
+//               printLog(out, "===========>>>>>>>>>>");
+
+                printLog(out, "===========>>>>>>>>>>");
+
+                printLog(out, "OrgId,UserIds,UCount,OrgCount,UserCounts,OrgName,OrgType,Status");
+                for (Map.Entry<String, Map<String, Integer>> entry : orgToUser.entrySet()) {
+                    StringBuilder sb = new StringBuilder();
+                    StringBuilder names = new StringBuilder();
+                    StringBuilder counts = new StringBuilder();
+                    int count = 0;
+                    for (Map.Entry<String, Integer> e : entry.getValue().entrySet()) {
+                        names.append(e.getKey()).append("-");
+                        counts.append(e.getValue()).append("-");
+                        count++;
+                    }
+
+                    sb.append(entry.getKey()).append(",").append(names.toString()).append(",").append(count).append(",").append(sortedOrgMap.get(entry.getKey())).append(",").append(counts.toString());
+
+                    if (result.containsKey(entry.getKey())) {
+                        CSVRecord r = result.get(entry.getKey());
+
+                        sb.append(",").append(r.get(4).replace(',','-').replace('"',' ').replace(">", "&gt").replace("<", "&lt")).append(",").append(r.get(5)).append(",").append(r.get(8));
+
+                    } else {
+                        sb.append(",").append("EMPTY").append(",").append("EMPTY").append(",").append("EMPTY");
+                    }
+
+                    //printLog(out, sb.toString());
 
 
-//                log = "\n----> For null values with HTTP POST:";
-//                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(p -> p.getMethod().equals("POST")
-//                        && p.getCookie().equals("null") && p.getParam().equals("null"));
+                }
+
+               printLog(out, "===========>>>>>>>>>>");
+
+//                printLog(out, "OrgId,UserIds,UCount,OrgCount,UserCounts,OrgName,OrgType,Status");
+                printLog(out, "OrgId,OrgCount,Status");
+                for (Map.Entry<String, Map<String, Integer>> entry : orgToUser.entrySet()) {
+//                    StringBuilder sb = new StringBuilder();
+//                    StringBuilder names = new StringBuilder();
+//                    StringBuilder counts = new StringBuilder();
+//                    int count = 0;
+//                    for (Map.Entry<String, Integer> e : entry.getValue().entrySet()) {
+//                        names.append(e.getKey()).append("-");
+//                        counts.append(e.getValue()).append("-");
+//                        count++;
+//                    }
 //
-//                List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
-//                for (Counters counter : mcounters) {
-//                    System.out.print(counter.getReferer() + " ##### ");
-//                    log += "\n\nOrg Id *****  " + counter.getOrgId();
-//                    log += "\nUser Agent ---- " + counter.getUserAgent();
-//                    log += "\nLogin type ==== " + counter.getLoginType();
-//                    log += "\nReferer   ##### " + counter.getReferer();
-//                }
+//                    sb.append(entry.getKey()).append(",").append(names.toString()).append(",").append(count).append(",").append(sortedOrgMap.get(entry.getKey())).append(",").append(counts.toString());
+
+//                    if (result.containsKey(entry.getKey())) {
+//                        CSVRecord r = result.get(entry.getKey());
 //
-//                printLog(out, log);
+//                        sb.append(",").append(r.get(4).replace(',','-').replace('"',' ').replace(">", "&gt").replace("<", "&lt")).append(",").append(r.get(5)).append(",").append(r.get(8));
+//
+//                    } else {
+//                        sb.append(",").append("EMPTY").append(",").append("EMPTY").append(",").append("EMPTY");
+//                    }
 
-                // Questions to ask to filter out the possibilities:
-                // 1. We currently have null values for parameters. Can param be null in CSRF attack? If not, we can rule them out from the scenario which we are trying to determine
-                // 2. What other scenarios should we be looking for in terms of combinations for cookie and param values?
-                // 3. We also need to think about all the HTTP methods when thinking about the combinations.
-                log = "\n----> For SessionType as UI (for UI): ";
-                printLog(out, log);
-                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(p -> p.getLoginType().split("//")[0].equals("UI")
-                        && p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)")
-                        && (p.getUserAgent().length() <= "Mozilla/".length() || p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/"))
-                        && (p.getCookie().equals("null") || !p.getParam().equals("null")));
+                    //printLog(out, sb.toString());
+// STATUS: r.get(8): ACTIV ACTIVE EMPTY
+// Org ID: entry.getKey()
+// Count: sortedOrgMap.get(entry.getKey())
 
-                List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
 
-                if (mcounters.size() == 0) {
-                    printLog(out, "no logs");
-                } else {
-                    printLog(out, "Total number of UI logins to investigate: " + mcounters.size());
-                    for (Counters counter : mcounters) {
-//                        System.out.print(counter.getReferer() + " ##### ");
-                        StringBuilder blog = new StringBuilder();
-                        blog.append("\n\nOrg Id:\t" + counter.getOrgId());
-                        blog.append("\nUser Agent:\t" + counter.getUserAgent());
-                        blog.append("\nLogin type:\t" + counter.getLoginType());
-                        blog.append("\nReferer:\t" + counter.getReferer());
-                        blog.append("\nCookie/Param:\t" + counter.getCookie() + "/" + counter.getParam());
-                        blog.append("\nUser Name:\t" + counter.getName());
-                        printLog(out, blog.toString());
+                    StringBuilder sb = new StringBuilder();
+
+                    int count = sortedOrgMap.get(entry.getKey());
+                    String status = null;
+                    if (result.containsKey(entry.getKey())) {
+                        status = result.get(entry.getKey()).get(8);
+                    } else {
+                        status = "EMPTY";
+                    }
+
+
+                    if (count > 10 && (status.equals("ACTIV") || status.equals("ACTIVE") || status.equals("EMPTY"))) {
+//                        sb.append(entry.getKey()).append(",").append(String.valueOf(count)).append(",").append(status);
+                        sb.append("insert into upgdata.up198_forcedlogin_optedout_org (organization_id) values ('");
+                        sb.append(entry.getKey()).append("');");
+                        printLog(out, sb.toString());
                     }
                 }
 
+                printLog(out, "===========>>>>>>>>>>");
+
+
+//                log = "----> total for POST: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST")).count();
+//                // printLog(out, log);
+//                log = "----> total for GET: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET")).count();
+//                // printLog(out, log);
+//
+//                log = "----> total for POST with browser: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && this.isBrowser(p.getUserAgent())).count();
+                // printLog(out, log);
+
+//                log = "----> total for GET with browser: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && this.isBrowser(p.getUserAgent())).count();
+                // printLog(out, log);
+
+                // printLog(out, "---> Orgs with number of users:");
+//                int counterMoreThanOne = 0;
+//                for (Map.Entry<String, Map<String, Counters>> entry : orgs.entrySet()) {
+//                    // printLog(out, "Org: " + entry.getKey() + ", Count: " + entry.getValue().size());
+//                    if (entry.getValue().size() > 1) counterMoreThanOne++;
+//                }
+
+//                long nullRefs = this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals(METHOD) && this.isBrowser(p.getUserAgent()) && p.getReferer().equals("null")).count();
+                // printLog(out, "---> Total null referrers: " + nullRefs);
+
+//                long nonNullRefs = this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals(METHOD) && this.isBrowser(p.getUserAgent()) && !p.getReferer().equals("null")).count();
+                // printLog(out, "---> Total Non referrers: " + nonNullRefs);
+
+
+                // printLog(out, "---> %age non-nulls: " + (nonNullRefs * 100)/(nullRefs + nonNullRefs));
+
+//                Stream<Counters> streamOfCounters = this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals(METHOD) && this.isBrowser(p.getUserAgent()) && !p.getReferer().equals("null"));
+//                // printLog(out, "===========================");
+////                logInfo(out, streamOfCounters);
+//                // printLog(out, "===========================");
+//
+//                // printLog(out, "Number of orgs more than 1 user: " + counterMoreThanOne);
+//
+//
+////                log = "----> total for POST with null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && p.getProxy().equals("null")).count();
+////                // printLog(out, log);
+////
+////                log = "----> total for POST with non null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getProxy().equals("null")).count();
+////                // printLog(out, log);
+////                log = "----> total for GET with non null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && !p.getProxy().equals("null")).count();
+////                // printLog(out, log);
+////
+////                log = "----> total for GET with null XiProxy: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && p.getProxy().equals("null")).count();
+////                // printLog(out, log);
+////                log = "----> total for GET with null cookie and null value: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("GET") && p.getCookie().equals("null") && p.getParam().equals("null")).count();
+////
+////                // printLog(out, log);
+////                log = "----> total for POST with cookie and null param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getCookie().equals("null") && p.getParam().equals("null")).count();
+////                // printLog(out, log);
+////                log = "----> total for POST with null cookie and null param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && p.getCookie().equals("null") && p.getParam().equals("null")).count();
+////                // printLog(out, log);
+////
+////                log = "----> total for POST with cookie and param: " + this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getCookie().equals("null") && !p.getParam().equals("null")).count();
+////                // printLog(out, log);
+////
+////                log = "----> total with non null user agent: " + this.counters.parallelStream().filter(p -> !"null".equals(p.getUserAgent())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total with non null referer: " + this.counters.parallelStream().filter(p -> !"null".equals(p.getReferer())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total with null referer: " + this.counters.parallelStream().filter(p -> "null".equals(p.getReferer())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total POST with non null referer: " + this.counters.parallelStream().filter(
+////                        p -> "POST".equals(p.getMethod()) & !"null".equals(p.getReferer())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total POST with null referer: " + this.counters.parallelStream().filter(
+////                        p -> "POST".equals(p.getMethod()) &  "null".equals(p.getReferer())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total POST with null referer and null param: " +
+////                        this.counters.parallelStream().filter(p -> "null".equals(p.getReferer()) & "null".equals(p.getParam()) & "POST".equals(p.getMethod())).count();
+////                // printLog(out, log);
+////
+////                log = "----> total POST with null referer and null param and null cookie: " +
+////                        this.counters.parallelStream().filter(p -> "null".equals(p.getReferer()) & "null".equals(p.getParam())
+////                                & "null".equals(p.getCookie()) & "POST".equals(p.getMethod())).count();
+////                // printLog(out, log);
+//
+//                log = "----> Total orgs: " + orgsCounter.size();
+//                // printLog(out, log);
+//
+//                for(Map.Entry<String, Integer> entry : orgsCounter.entrySet()) {
+//                    StringBuilder sb = new StringBuilder();
+//                    sb.append("OrgId: ").append(entry.getKey()).append(", Count: ").append(entry.getValue());
+////                    printLog(out, sb.toString());
+//                }
+//
+//                log = "----> Total user agents: " + userAgentCounters.size();
+//                // printLog(out, log);
+//
+//                log = "----> User agents:\n";
+//                // printLog(out, log);
+//
+//                log = "----> Total users: " + userCounter.size();
+//                // printLog(out, log);
+//
+//                Set<String> agents = userAgentCounters.keySet();
+//                log = "";
+//                int nonBrowserAttempt = 0;
+//                StringBuilder nonBrowserAgents = new StringBuilder();
+//                for (String agent : agents) {
+//                    log += agent + " ##### ";
+//                    if (agent.length() <= "Mozilla/".length() || !agent.substring(0, "Mozilla/".length()).equals("Mozilla/")) {
+//                        nonBrowserAgents.append(agent).append(" ##### ");
+//                        nonBrowserAttempt++;
+//                    }
+//                }
+//
+//
+////                // printLog(out, log);
+//
+//                log = "----> Non browser attempts: " + nonBrowserAttempt;
+//
+//                // printLog(out, log);
+//
+//                // printLog(out, nonBrowserAgents.toString());
+//
+//                log = "----> Total login types: " + typeOfLoginCounters.size();
+//                // printLog(out, log);
+//
+//                log = "----> Login types: ";
+//                // printLog(out, log);
+//
+//                Set<String> types = typeOfLoginCounters.keySet();
+//                log = "";
+//                int nonUITotal = 0;
+//                int totalNonUITypes = 0;
+//                StringBuilder nonUIAttempts = new StringBuilder();
+////                nonUIAttempts.append("\n*** Non-UI attempt types: \n");
+////                for (String agent : types) {
+////                    log += agent + " ##### ";
+////                    if (!"UI".equals(agent.split(",")[0])) {
+////                        nonUITotal += typeOfLoginCounters.get(agent);
+////                        totalNonUITypes++;
+////                        nonUIAttempts.append(agent).append(" ##### ");
+////                    }
+////                }
+////
+////                // printLog(out, log);
+//
+//
+//                log = "\n*** Total Non UI type logins: " + totalNonUITypes + ", total login attemps for non-ui types: " + nonUITotal;
+//                // printLog(out, log);
+////                // printLog(out, nonUIAttempts.toString());
+//
+//                log = "----> total with UI login, HTTP POST, mismatch values: "
+//                        + this.counters.parallelStream().filter(p -> !"UI".equals(p.getLoginType().split(",")[0])
+//                        && p.getMethod().equals(METHOD)
+//                        && !p.getCookie().equals(p.getParam())
+//
+//                ).count();
+//                // printLog(out, log);
+//
+//                // printLog(out, "\nTotal with browser and UI");
+//
+//
+//                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+////                                METHOD.equals(p.getMethod().toUpperCase()) &&
+//                                p.getLoginType().split("//")[0].equals("UI") &&
+//                                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+//
+////                logInfo(out, mismatchCounters);
+//
+//
+//                StringBuilder sb = new StringBuilder();
+//                sb.append(mismatchCounters.count());
+//                // printLog(out, sb.toString());
+//
+//                // printLog(out, "\nlogin.salesforce.com only");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+////                                METHOD.equals(p.getMethod().toUpperCase()) &&
+//                                p.getLoginType().split("//")[0].equals("UI") &&
+//                                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        (p.getReferer().equals("https://login.salesforce.com/") || p.getReferer().equals("https://login.salesforce.com//") || p.getReferer().equals("https://login.salesforce.com")) &&
+//                true);
+//
+////                logInfo(out, mismatchCounters);
+//                sb = new StringBuilder();
+//                sb.append(mismatchCounters.count());
+//                // printLog(out, sb.toString());
+//
+//                // printLog(out, "========>>>>>");
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+////                                METHOD.equals(p.getMethod().toUpperCase()) &&
+//                                p.getLoginType().split("//")[0].equals("UI") &&
+//                                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        p.getReferer().contains("saml") &&
+//                                        true);
+//
+////                logInfo(out, mismatchCounters);
+////                log = "\n----> For mismatch values with HTTP POST:";
+////                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(p -> p.getMethod().equals(METHOD)
+////                                && !p.getCookie().equals("null") && !p.getParam().equals("null"));
+////
+////                List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
+////                for (Counters counter : mcounters) {
+////                    System.out.print(counter.getReferer() + " ##### ");
+////                    log += "\n\nOrg Id *****  " + counter.getOrgId();
+////                    log += "\nUser Agent ---- " + counter.getUserAgent();
+////                    log += "\nLogin type ==== " + counter.getLoginType();
+////                    log += "\nReferer   ##### " + counter.getReferer();
+////                }
+////
+////                // printLog(out, log);
+//
+//
+////                log = "\n----> For null values with HTTP POST:";
+////                Stream<Counters> mismatchCounters = this.counters.parallelStream().filter(p -> p.getMethod().equals(METHOD)
+////                        && p.getCookie().equals("null") && p.getParam().equals("null"));
+////
+////                List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
+////                for (Counters counter : mcounters) {
+////                    System.out.print(counter.getReferer() + " ##### ");
+////                    log += "\n\nOrg Id *****  " + counter.getOrgId();
+////                    log += "\nUser Agent ---- " + counter.getUserAgent();
+////                    log += "\nLogin type ==== " + counter.getLoginType();
+////                    log += "\nReferer   ##### " + counter.getReferer();
+////                }
+////
+////                // printLog(out, log);
+//
+//                // Questions to ask to filter out the possibilities:
+//                // 1. We currently have null values for parameters. Can param be null in CSRF attack? If not, we can rule them out from the scenario which we are trying to determine
+//                // 2. What other scenarios should we be looking for in terms of combinations for cookie and param values?
+//                // 3. We also need to think about all the HTTP methods when thinking about the combinations.
+////                log = "\n----> For SessionType as UI (for UI): ";
+//
+//                // Since the number of users are considerable lower
+//                // printLog(out, "Users with more than one attempt");
+//
+//                SortedMap<String, List<Counters>> smap = new TreeMap<String, List<Counters>>();
+//
+//                smap.putAll(userIdToUserName);
+//
+////                Stream<Map.Entry<String, Integer>> sorted = userCounter.entrySet().stream().sorted(Collections.reverseOrder(Map.Entry.comparingByValue()));
+//
+////                Map<String, Integer> top50 = sorted.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+//                int post = 0;
+//                int get = 0;
+//                for (Map.Entry<String, List<Counters>> entry : smap.entrySet()) {
+//                    if (entry.getValue().size() > 1) {
+//                        Counters ctr = smap.get(entry.getKey()).get(0);
+//                        String referer = ctr.getReferer().toLowerCase();
+//                        if (referer.contains("https://login.salesforce.com")
+//                                && this.isBrowser(ctr.getUserAgent())
+////                                || (referer.contains(".salesforce.com") && !referer.contains("my.salesforce.com"))
+//                                ) {
+//                            // printLog(out, "UID: " + entry.getKey() + ", Count: " + entry.getValue().size());
+//
+//                            // printLog(out, "Name: " + ctr.getName());
+//                            // printLog(out, "Refer: " + ctr.getReferer());
+//                            // printLog(out, "Cookie: " + ctr.getCookie());
+//                            // printLog(out, "Param: " + ctr.getParam());
+//
+//                            // printLog(out, "Method: " + ctr.getMethod() + "\n");
+//                        }
+//                    }
+//                }
+//
+////                for (Map.Entry<String, List<Counters>> entry : userIdToUserName.entrySet()) {
+////                    if (entry.getValue().size() >= 1) {
+////                        Counters ctr = userIdToUserName.get(entry.getKey()).get(0);
+////                        String referer = ctr.getReferer().toLowerCase();
+////                        if (referer.contains("https://login.salesforce.com")
+////                                && this.isBrowser(ctr.getUserAgent())
+//////                                || (referer.contains(".salesforce.com") && !referer.contains("my.salesforce.com"))
+////                                ) {
+////                            // printLog(out, "UID: " + entry.getKey() + ", Count: " + entry.getValue().size());
+////
+////                            // printLog(out, "Name: " + ctr.getName());
+////                            // printLog(out, "Refer: " + ctr.getReferer());
+////                            // printLog(out, "Cookie: " + ctr.getCookie());
+////                            // printLog(out, "Param: " + ctr.getParam());
+////
+////                            // printLog(out, "Method: " + ctr.getMethod() + "\n");
+////                        }
+////                    }
+////                }
+//
+//                // printLog(out, "POST with browser and UI");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                "GET".equals(p.getMethod().toUpperCase()) &&
+//                                p.getLoginType().split("//")[0].equals("UI") &&
+//                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+//
+////                logInfo(out, mismatchCounters);
+//
+//
+//                // printLog(out, "POST without browser");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                "GET".equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() <= "Mozilla/".length() || !p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        !this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+////
+////                logInfo(out, mismatchCounters);
+//                // printLog(out, "POST with browser");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                "GET".equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+////                                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+//                // printLog(out, String.valueOf(mismatchCounters.count()));
+//
+//                // printLog(out, "Cookie NULL, Param NULL");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                METHOD.equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+//                        (p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+//
+//
+////                logInfo(out, mismatchCounters);
+//
+//                // printLog(out, "Cookie not NULL, Param NULL");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                METHOD.equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+//                        (!p.getCookie().equals("null") && p.getParam().equals("null")) &&
+//                                        true);
+//
+////                logInfo(out, mismatchCounters);
+//
+//                // printLog(out, "Cookie NULL, Param not NULL");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                METHOD.equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+//                                        (p.getCookie().equals("null") && !p.getParam().equals("null")) &&
+//                                        true);
+//
+////                logInfo(out, mismatchCounters);
+//
+//                // printLog(out, "Cookie not NULL, Param not NULL");
+//
+//                mismatchCounters = this.counters.parallelStream().filter(
+//                        p ->
+//                                METHOD.equals(p.getMethod().toUpperCase()) &&
+////                                p.getLoginType().split("//")[0].equals("UI") &&
+////                        p.getLoginType().split("//")[1].endsWith("(db=A,api=Application)") &&
+////                                        (p.getUserAgent().length() >= "Mozilla/".length() && p.getUserAgent().substring(0, "Mozilla/".length()).equals("Mozilla/")) &&
+//                                        this.isBrowser(p.getUserAgent()) &&
+//                                        (!p.getCookie().equals("null") && !p.getParam().equals("null")) &&
+//                                        true);
+
+//                logInfo(out, mismatchCounters);
 
 //                System.out.println("----> Login names for cookie and param mismatch for HTTP POST");
-//                Stream<Counters> stream = this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals("POST") && !p.getCookie().equals("null") && !p.getParam().equals("null"));
+//                Stream<Counters> stream = this.counters.parallelStream().filter(p -> p.getMethod().toUpperCase().equals(METHOD) && !p.getCookie().equals("null") && !p.getParam().equals("null"));
 //                List<Counters> counterses = stream.collect(Collectors.<Counters>toList());
 //                for (Counters counter : counterses) {
 //                    System.out.print(counter.getName() + ", ");
@@ -380,6 +803,53 @@ public class LogAnalysis { // extends Service {
         }
     }
 
+    private HashMap<String, Integer> sortByValues(Map<String, Integer> map) {
+        List list = new LinkedList(map.entrySet());
+        // Defined Custom Comparator here
+
+        Collections.sort(list, new Comparator() {
+            public int compare(Object o1, Object o2) {
+                return -((Comparable) ((Map.Entry) (o1)).getValue())
+                        .compareTo(((Map.Entry) (o2)).getValue());
+            }
+        });
+
+        // Here I am copying the sorted list in HashMap
+        // using LinkedHashMap to preserve the insertion order
+        HashMap<String, Integer> sortedHashMap = new LinkedHashMap<String, Integer>();
+        for (Iterator it = list.iterator(); it.hasNext();) {
+            Map.Entry<String, Integer> entry = (Map.Entry) it.next();
+            sortedHashMap.put(entry.getKey(), entry.getValue());
+        }
+        return sortedHashMap;
+    }
+
+    private void logInfo(PrintWriter out, Stream<Counters> mismatchCounters) {
+        List<Counters> mcounters = mismatchCounters.collect(Collectors.<Counters>toList());
+
+
+        if (mcounters == null || mcounters.size() == 0) {
+            // printLog(out, "no logs");
+        } else {
+            int m = 0;
+            // printLog(out, "Total number of UI logins: " + mcounters.size());
+            for (Counters counter : mcounters) {
+//                        System.out.print(counter.getReferer() + " ##### ");
+                StringBuilder blog = new StringBuilder();
+                blog.append("\n\nCounter:\t" + ++m);
+                blog.append("\nOrg Id:\t" + counter.getOrgId());
+                blog.append("\nUser Agent:\t" + counter.getUserAgent());
+                blog.append("\nLogin type:\t" + counter.getLoginType());
+                blog.append("\nReferer:\t" + counter.getReferer());
+                blog.append("\nCookie/Param:\t" + counter.getCookie() + "/" + counter.getParam());
+                blog.append("\nUser Name:\t" + counter.getName());
+                blog.append("\nMethod:\t" + counter.getMethod());
+                blog.append("\nUser ID:\t" + counter.getUserId());
+                if (m <= 70);
+                // printLog(out, blog.toString());
+            }
+        }
+    }
     private void printLog(PrintWriter out, String log) {
         if (out != null) {
             out.println(log);
@@ -401,60 +871,103 @@ public class LogAnalysis { // extends Service {
                 String cookie = tokens[30].trim();
                 String param = tokens[10].trim().split("///")[0].split("\"")[0];
                 String orgId = tokens[21].trim();
+                String userId = tokens[22].trim();
                 String loginType = tokens[8].trim().split("//")[0] + "//" + tokens[8].trim().split("//")[1];
-                String referer = tokens[7].trim().split("//")[0];
-                if (referer != null && !referer.equals("null")) {
-                    referer = tokens[7].trim().split("//")[0] + "//" + tokens[7].trim().split("//")[1];
-                }
+                String referer = tokens[7].trim().split("//\\{")[0];
+//                if (referer != null && !referer.equals("null")) {
+//                    referer = tokens[7].trim().split("//")[0] + "//" + tokens[7].trim().split("//")[1];
+//                }
                 String userAgent = tokens[4].trim().split("///")[0];
                 String xiProxy = tokens[6].trim();
-                int i = 0;
-//
-// method = 5
-//                logintype = 8.split(//) 0 + 1
-//                cookie = 30
-//                value = 10.split(, ") 0
-//                referer = 7.split(///) 0
-//                user agent = 4.split(///) 0
-//                user name = 2
-//                xiIdentifier = 6
-//                String xiProxy = "";
-//                try {
-//                    xiProxy = tokens[8].split("`")[3].trim();
-//                } catch (Exception ex) {
-//                    printLog(null, "ERROR: " + tokens[8]);
-//                    xiProxy = tokens[10].split("`")[4].trim();
-//                }
-//
+if (this.isBrowser(userAgent)) {
+    Counters counter1 = new Counters(name, method, xiProxy, cookie, param, loginType, referer, userAgent, orgId, userId);
+
+
+    if (!Strings.isNullOrEmpty(orgId)) {
+        // Add to the org to user mapping
+        if (orgToUser.containsKey(orgId)) {
+            Map <String, Integer> userList = orgToUser.get(orgId);
+            if (userList.containsKey(userId)) {
+                int counter = userList.get(userId);
+                userList.put(userId, counter + 1);
+            } else {
+                userList.put(userId, 1);
+            }
+
+
+        } else {
+            Map<String, Integer> userList = new HashMap<String, Integer>();
+            userList.put(userId, 1);
+            orgToUser.put(orgId, userList);
+        }
+
+
+        if (orgsCounter.containsKey(orgId)) {
+            int counter = orgsCounter.get(orgId);
+            orgsCounter.put(orgId, counter + 1);
+        } else {
+            orgsCounter.put(orgId, 1);
+        }
+    }
                 if (!Strings.isNullOrEmpty(orgId)) {
-                    if (orgsCounter.containsKey(orgId)) {
-                        int counter = orgsCounter.get(orgId);
-                        orgsCounter.put(orgId, counter + 1);
+                    if (orgs.containsKey(orgId)) {
+                        Map<String, Counters> temp = orgs.get(orgId);
+                        if (!temp.containsKey(counter1.getUserId())) {
+                            temp.put(counter1.getUserId(), counter1);
+                        }
+
+                        orgs.remove(orgId);
+                        orgs.put(orgId, temp);
                     } else {
-                        orgsCounter.put(orgId, 1);
+                        Map<String, Counters> temp = new HashMap<String, Counters>();
+                        temp.put(counter1.getUserId(), counter1);
+                        orgs.put(orgId, temp);
                     }
                 }
 
-                if (!Strings.isNullOrEmpty(userAgent)) {
-                    if (userAgentCounters.containsKey(userAgent)) {
-                        int counter = userAgentCounters.get(userAgent);
-                        userAgentCounters.put(userAgent, counter + 1);
-                    } else {
-                        userAgentCounters.put(userAgent, 1);
-                    }
-                }
+    if (!Strings.isNullOrEmpty(userId)) {
+        if (userIdToUserName.containsKey(userId)) {
+            List<Counters> list = userIdToUserName.get(userId);
+            userIdToUserName.remove(userId);
+            list.add(counter1);
+            userIdToUserName.put(userId, list);
+        } else {
+            List<Counters> list = new ArrayList<Counters>();
+            list.add(counter1);
+            userIdToUserName.put(userId, list);
+        }
 
-                if (!Strings.isNullOrEmpty(loginType)) {
-                    if (typeOfLoginCounters.containsKey(loginType)) {
-                        int counter = typeOfLoginCounters.get(loginType);
-                        typeOfLoginCounters.put(loginType, counter + 1);
-                    } else {
-                        typeOfLoginCounters.put(loginType, 1);
-                    }
-                }
+        if (userCounter.containsKey(userId)) {
+            int counter = userCounter.get(userId);
+//                        userCounter.remove(userId);
+            userCounter.put(userId, counter + 1);
+        } else {
+            userCounter.put(userId, 1);
+
+        }
+    }
+
+    if (!Strings.isNullOrEmpty(userAgent)) {
+        if (userAgentCounters.containsKey(userAgent)) {
+            int counter = userAgentCounters.get(userAgent);
+            userAgentCounters.put(userAgent, counter + 1);
+        } else {
+            userAgentCounters.put(userAgent, 1);
+        }
+    }
+
+    if (!Strings.isNullOrEmpty(loginType)) {
+        if (typeOfLoginCounters.containsKey(loginType)) {
+            int counter = typeOfLoginCounters.get(loginType);
+            typeOfLoginCounters.put(loginType, counter + 1);
+        } else {
+            typeOfLoginCounters.put(loginType, 1);
+        }
+    }
 //
-                counters.add(new Counters(name, method, xiProxy, cookie, param, loginType, referer, userAgent, orgId));
-
+//                if (counter1.getMethod().equals(METHOD))
+    counters.add(counter1);
+}
 //                category = analyzeCSPEmailTemplateRecord(blockedUri, documentUri, violatedDirective);
 //                e_totalCount += 1;
 
@@ -544,7 +1057,33 @@ public class LogAnalysis { // extends Service {
 		}
 	}*/
 
+    private static final String [] FILE_HEADER_MAPPING = {"Account","Active","CreatedDate","Id","Name","OrganizationType","Server","SignupCountryIsoCode","Status"};
+
+    public static Map<String, CSVRecord> nameMap(List<CSVRecord> records) {
+
+        return Maps.uniqueIndex(records, c -> c.get(3).substring(0, ((c.get(3).length() > 3) ? c.get(3).length() - 3 : c.get(3).length())));
+    }
+
     public static void main(String[] args) throws IOException {
+
+        FileReader fileReader = null;
+
+        CSVParser csvParser = null;
+
+        CSVFormat format = CSVFormat.DEFAULT.withHeader(FILE_HEADER_MAPPING);
+
+        List<Organization> orgs = new ArrayList<Organization>();
+        fileReader = new FileReader("/Users/vtaneja/Downloads/WorkBenchQuery.csv");
+        csvParser = new CSVParser(fileReader, format);
+        List<CSVRecord> records =  csvParser.getRecords();
+
+//        FileInputStream fis = new FileInputStream("/Users/vtaneja/Downloads/WorkBenchQuery.csv");
+//        InputStreamReader isr = new InputStreamReader(fis);
+//
+//        //File csvData = new File("/Users/vtaneja/Downloads/WorkBenchQuery.csv");
+//        CSVParser parser = CSVParser.parse(isr, CSVFormat.RFC4180);
+//        List<CSVRecord> list = parser.getRecords();
+
 
         // Currently, the code is dependent on the placement of the fields in the CSV file.
         // Use the following query to get the file.
@@ -554,6 +1093,7 @@ public class LogAnalysis { // extends Service {
         // index=* `logRecordType(sclcm)` 	earliest=-15m url!="/*" | fields method,postParam,queryString,url,userName,loginCsrfCookieVal,loginCsrfParamVal,theRest
 //==>      index=* `logRecordType(sclcm)` 	earliest=-15m url!="/*" | fields logRecordType,theRest
 
+        result = LogAnalysis.nameMap(records);
         LogAnalysis fp = new LogAnalysis("/Users/vtaneja/ForcedLogin");
 
         try {
@@ -576,5 +1116,15 @@ public class LogAnalysis { // extends Service {
                 fp.getBr().close();
             }
         }
+    }
+
+    private boolean isBrowser(final String userAgent) {
+        if (Strings.isNullOrEmpty(userAgent)) return false;
+
+        if (userAgent.toLowerCase().contains("firefox") || userAgent.toLowerCase().contains("chrome")
+                || userAgent.toLowerCase().contains("chromium") || userAgent.toLowerCase().contains("safari")
+                || userAgent.toLowerCase().contains("opera") || userAgent.toLowerCase().contains("msie")) return true;
+
+        return false;
     }
 }
