@@ -12,6 +12,7 @@ import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Created by vtaneja on 5/11/16.
@@ -33,8 +34,27 @@ public class HttpsUtility {
         // Init the SSLContext with a TrustManager[] and SecureRandom()
         sc.init(null, getTrustManagers(), new java.security.SecureRandom());
         connection.setSSLSocketFactory(sc.getSocketFactory());
-        connection.connect();
+        AtomicBoolean connectionSuccessful = new AtomicBoolean();
+        connectionSuccessful.set(true);
+        try {
+            connection.connect();
+        } catch (javax.net.ssl.SSLHandshakeException ex) {
+            connectionSuccessful.set(false);
+            System.out.println("Exception: Failed to connect - " + ex.getMessage());
+        } finally {
+            connection.disconnect();
+        }
+
+        if (connectionSuccessful.get()) {
+            if (connection.getResponseCode() == -1) {
+                System.out.println("Failed to connect" + connection.getResponseMessage());
+            } else {
+                System.out.println("Connection successful with HTTP returned code: " + connection.getResponseCode()
+                        + ", Response message: " + connection.getResponseMessage());
+            }
+        }
         System.out.println();
+        connection.disconnect();
     }
 
     private static KeyStore openKeyStore(String pkcs12File, String password, String type) throws IOException,
